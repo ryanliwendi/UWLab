@@ -1,0 +1,16 @@
+# Gripper metadata for the DROID Franka Panda + Robotiq 2F-85 robot
+# (franka_robotiq_2f_85_flattened.usd from huggingface.co/datasets/owhan/DROID-sim-environments).
+#
+# The DROID gripper's `base_link` frame matches UWLab's `robotiq_base_link` frame: the fingers point
+# along +x and close along y, with fingertips about 0.09-0.15 m out. So the values below are copied
+# from UWLab's calibrated Robotiq 2F-85 (Robots/UniversalRobots/2f85RobotiqGripperCalibrated).
+gripper_offset:
+  pos: [0.1345, 0.0, 0.0]
+  quat: [0.5, 0.5, 0.5, 0.5]
+finger_offset: 0.1345
+finger_clearance: 0.06
+maximum_aperture: 0.09
+gripper_approach_direction: [1, 0, 0]
+grasp_align_axis: [1, 0, 0]
+orientation_sample_axis: [1, 0, 0]
+finger_open_joint_angle: 0.0

@@ -62,6 +62,17 @@ class RelCartesianOSCAction(ActionTerm):
             )
         self._ee_body_idx = body_ids[0]
 
+        # PhysX Jacobian indices: fixed-base articulations have no Jacobian row for the root body
+        if self.cfg.jacobian_source == "physx":
+            if not self._asset.is_fixed_base:
+                raise ValueError("jacobian_source='physx' only supports fixed-base articulations.")
+            self._jacobi_body_idx = self._ee_body_idx - 1
+        elif self._num_dof != 6:
+            raise ValueError(
+                f"jacobian_source='ur5e_analytical' needs the 6 UR5e arm joints, got {self._num_dof}: "
+                f"{self._joint_names}. Use jacobian_source='physx' for other arms."
+            )
+
         # Controller gains (per-env for domain randomization): Kd = 2 * sqrt(Kp) * damping_ratio
         kp = torch.tensor(cfg.motion_stiffness, device=self.device, dtype=torch.float32)
         damping_ratio = torch.tensor(cfg.motion_damping_ratio, device=self.device, dtype=torch.float32)
@@ -73,6 +84,12 @@ class RelCartesianOSCAction(ActionTerm):
         self._kp = kp.unsqueeze(0).expand(self.num_envs, -1).clone()
         self._kd = kd.unsqueeze(0).expand(self.num_envs, -1).clone()
         self._torque_max = torch.tensor(cfg.torque_limit, device=self.device, dtype=torch.float32)
+        if len(self._torque_max) != self._num_dof:
+            raise ValueError(f"torque_limit has {len(self._torque_max)} values but the arm has {self._num_dof} joints.")
+
+        # Null-space posture gains (joint space)
+        self._nullspace_kp = cfg.nullspace_stiffness
+        self._nullspace_kd = 2.0 * cfg.nullspace_stiffness**0.5 * cfg.nullspace_damping_ratio
 
         # Action scaling
         self._scale = torch.tensor(cfg.scale_xyz_axisangle, device=self.device, dtype=torch.float32)
@@ -145,8 +162,11 @@ class RelCartesianOSCAction(ActionTerm):
         joint_pos = self._asset.data.joint_pos[:, self._joint_ids]
         joint_vel = self._asset.data.joint_vel[:, self._joint_ids]
 
-        # Analytical Jacobian (base_link frame, matching EE pose frame)
-        jacobian = compute_jacobian_analytical(joint_pos, device=str(self.device))
+        # Jacobian in the root (base_link) frame, matching the EE pose frame
+        if self.cfg.jacobian_source == "physx":
+            jacobian = self._get_physx_jacobian_root_frame()
+        else:
+            jacobian = compute_jacobian_analytical(joint_pos, device=str(self.device))
 
         # EE velocity from J @ dq (consistent with analytical Jacobian)
         ee_vel = torch.bmm(jacobian, joint_vel.unsqueeze(-1)).squeeze(-1)  # (N, 6)
@@ -161,6 +181,8 @@ class RelCartesianOSCAction(ActionTerm):
         vel_error = -ee_vel
         task_force = self._kp * pose_error + self._kd * vel_error
         joint_torques = torch.bmm(jacobian.transpose(-1, -2), task_force.unsqueeze(-1)).squeeze(-1)
+        if self._nullspace_kp > 0.0:
+            joint_torques += self._compute_nullspace_torques(jacobian, joint_pos, joint_vel)
         joint_torques = torch.clamp(joint_torques, -self._torque_max, self._torque_max)
 
         self._asset.set_joint_effort_target(joint_torques, joint_ids=self._joint_ids)
@@ -189,3 +211,26 @@ class RelCartesianOSCAction(ActionTerm):
             ee_quat_w,
         )
         return ee_pos_b, ee_quat_b
+
+    def _get_physx_jacobian_root_frame(self) -> torch.Tensor:
+        """Get the EE Jacobian from PhysX, rotated from the world frame into the root (base_link) frame."""
+        jacobian = self._asset.root_physx_view.get_jacobians()[:, self._jacobi_body_idx]  # (N, 6, num_joints)
+        jacobian = jacobian[:, :, self._joint_ids]  # (N, 6, num_dof)
+        rot_b_w = math_utils.matrix_from_quat(math_utils.quat_inv(self._asset.data.root_quat_w))
+        return torch.cat([torch.bmm(rot_b_w, jacobian[:, :3]), torch.bmm(rot_b_w, jacobian[:, 3:])], dim=1)
+
+    def _compute_nullspace_torques(
+        self, jacobian: torch.Tensor, joint_pos: torch.Tensor, joint_vel: torch.Tensor
+    ) -> torch.Tensor:
+        """Joint PD torques toward the default joint positions, projected into the Jacobian null space.
+
+        Uses the (damped) pseudo-inverse projector N = I - J^T (J J^T)^-1 J, so these torques do not
+        produce a task-space force on the EE.
+        """
+        default_joint_pos = self._asset.data.default_joint_pos[:, self._joint_ids]
+        posture_torques = self._nullspace_kp * (default_joint_pos - joint_pos) - self._nullspace_kd * joint_vel
+        jjt = torch.bmm(jacobian, jacobian.transpose(-1, -2))
+        jjt = jjt + 1e-4 * torch.eye(6, device=self.device).unsqueeze(0)
+        identity = torch.eye(self._num_dof, device=self.device).unsqueeze(0)
+        projector = identity - torch.bmm(jacobian.transpose(-1, -2), torch.linalg.solve(jjt, jacobian))
+        return torch.bmm(projector, posture_torques.unsqueeze(-1)).squeeze(-1)

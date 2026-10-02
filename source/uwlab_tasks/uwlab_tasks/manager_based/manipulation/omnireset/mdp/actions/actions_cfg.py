@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import MISSING
+from typing import Literal
 
 from isaaclab.managers.action_manager import ActionTerm
 from isaaclab.managers.manager_term_cfg import ActionTermCfg
@@ -24,6 +25,9 @@ class RelCartesianOSCActionCfg(ActionTermCfg):
 
     No inertial dynamics decoupling, no mass matrix. Designed to work with
     the DelayedDCMotor actuator for sim2real alignment.
+
+    For other arms, set ``jacobian_source="physx"``. Arms with more than 6 joints (e.g. Franka)
+    should also set ``nullspace_stiffness`` so the redundant joints do not drift.
     """
 
     class_type: type[ActionTerm] = task_space_actions.RelCartesianOSCAction
@@ -55,5 +59,19 @@ class RelCartesianOSCActionCfg(ActionTermCfg):
     motion_damping_ratio: tuple[float, float, float, float, float, float] = (3.0, 3.0, 3.0, 1.0, 1.0, 1.0)
     """Task-space damping ratio. Kd = 2 * sqrt(Kp) * damping_ratio."""
 
-    torque_limit: tuple[float, float, float, float, float, float] = (150.0, 150.0, 150.0, 28.0, 28.0, 28.0)
-    """Per-joint torque limits (clamped after J^T multiplication)."""
+    torque_limit: tuple[float, ...] = (150.0, 150.0, 150.0, 28.0, 28.0, 28.0)
+    """Per-joint torque limits (clamped after J^T multiplication). One value per arm joint."""
+
+    jacobian_source: Literal["ur5e_analytical", "physx"] = "ur5e_analytical"
+    """Where the Jacobian comes from.
+
+    ``"ur5e_analytical"`` uses the calibrated UR5e kinematics and only works for the UR5e.
+    ``"physx"`` uses the physics engine's Jacobian and works for any fixed-base arm.
+    """
+
+    nullspace_stiffness: float = 0.0
+    """Joint-space stiffness pulling the arm toward its default joint positions, applied only in the
+    null space of the Jacobian so it does not disturb the end-effector. 0 disables it."""
+
+    nullspace_damping_ratio: float = 1.0
+    """Null-space damping ratio. Kd_null = 2 * sqrt(Kp_null) * damping_ratio."""
