@@ -3,7 +3,7 @@
 Each run folder (written by finetune_robometer.py) is labeled with its last checkpoint (the highest
 adapter_step<N>.pt, else adapter_last.pt; or adapter_step<--step>.pt), on the run's own camera, using every --frame_stride-th frame of the whole
 episode (the frame grid of --context training). Zero-shot Robometer labels the same videos for comparison. Episodes
-whose id is a multiple of 10 are held out (the validation split of preference_pairs.py); the others are training
+whose id is a multiple of 10 are held out (the validation split of generate_robometer_finetuning_data.py); the others are training
 episodes.
 
 Output in --out_dir/<run>/:

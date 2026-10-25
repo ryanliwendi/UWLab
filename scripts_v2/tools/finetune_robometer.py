@@ -51,13 +51,15 @@ Each evaluation reports six metrics:
            with the same segment frames, --progress_reduce as training
   pearson  on the successful episodes of --val_dataset: Pearson correlation between progress and time index,
            averaged over episodes
-  kendall  on the (successful, suboptimal, failure) triplets of --kendall_val_dataset (preference_pairs.py triplets, episodes
-           of --val_dataset): each episode scored by its average progress; Robometer's compute_kendall between the
-           scores and the ranks 3, 2, 1, averaged over triplets
-  kendall_binary  on the state pairs of --kendall_binary_pairs (preference_pairs.py kendall_pairs: two different
-           episodes of --val_dataset, each at a random frame t up to its first stacked frame for a success, its last
-           frame for a failure): each state scored by Robometer's progress at frame t given the episode's frames 0..t;
-           Robometer's compute_kendall between the two scores and the critic's V(s_t), averaged over pairs
+  kendall  on the (successful, suboptimal, failure) triplets of --kendall_val_dataset
+           (generate_robometer_finetuning_data.py triplets, episodes of --val_dataset): each episode scored by its
+           average progress; Robometer's compute_kendall between the scores and the ranks 3, 2, 1, averaged over
+           triplets
+  kendall_binary  on the state pairs of --kendall_binary_pairs (generate_robometer_finetuning_data.py kendall_pairs:
+           two different episodes of --val_dataset, each at a random frame t up to its first stacked frame for a
+           success, its last frame for a failure): each state scored by Robometer's progress at frame t given the
+           episode's frames 0..t; Robometer's compute_kendall between the two scores and the critic's V(s_t),
+           averaged over pairs
   pearson_critic  on every episode of --val_dataset: Pearson correlation between progress and the ground-truth
            critic's V(s) (value_ref in the episode's .npz) on the same frames, averaged over episodes
   pearson_critic_train  the same on --num_train_eval_episodes episodes of --train_dataset (a fixed random subset; only
@@ -105,7 +107,8 @@ from robometer.utils.setup_utils import setup_batch_collator, setup_peft_model
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument("--model_path", default="robometer/Robometer-4B")
 parser.add_argument("--train_pairs", default=None,
-                    help=".jsonl from preference_pairs.py (not needed with --eval_only or --pairs_per_step 0)")
+                    help=".jsonl from generate_robometer_finetuning_data.py sample (not needed with --eval_only or "
+                         "--pairs_per_step 0)")
 parser.add_argument("--val_pairs", required=True)
 parser.add_argument("--out_dir", required=True)
 parser.add_argument("--camera", choices=["front", "wrist"], default="front")
@@ -134,9 +137,11 @@ parser.add_argument("--num_val_pairs", type=int, default=500)
 parser.add_argument("--val_dataset", default="/scr/shared/real_to_sim_rewards/CubeStack_SuccessFailure_val",
                     help="validation episodes (collect_success_failure.py), for pearson and pearson_critic")
 parser.add_argument("--kendall_val_dataset", default="/scr/shared/real_to_sim_rewards/CubeStack_KendallTriplets_val",
-                    help="folder with triplets.jsonl (preference_pairs.py triplets) of --val_dataset episodes, for kendall")
+                    help="folder with triplets.jsonl (generate_robometer_finetuning_data.py triplets) of --val_dataset "
+                         "episodes, for kendall")
 parser.add_argument("--kendall_binary_pairs", default="/scr/shared/real_to_sim_rewards/CubeStack_SuccessFailure_val/kendall_binary_pairs.jsonl",
-                    help="state pairs (preference_pairs.py kendall_pairs) of --val_dataset episodes, for kendall_binary")
+                    help="state pairs (generate_robometer_finetuning_data.py kendall_pairs) of --val_dataset "
+                         "episodes, for kendall_binary")
 parser.add_argument("--train_dataset", default=None,
                     help="training episodes (collect_success_failure.py folder; the training pairs' episodes): the "
                          "--distill_clips clips and their critic targets, and pearson_critic_train")

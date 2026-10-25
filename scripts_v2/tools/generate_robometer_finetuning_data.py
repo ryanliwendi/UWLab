@@ -1,36 +1,45 @@
-"""Preference pairs for fine-tuning Robometer, labeled by the final OmniReset critic.
+"""Generate Robometer fine-tuning data from a collect_success_failure.py dataset, labeled by an OmniReset critic.
 
-Two steps (numpy only, no simulator needed):
+sample creates the training preference pairs; triplets and kendall_pairs write the validation sets of
+finetune_robometer.py's kendall and kendall_binary metrics. All three read the trajectory buffer written by build.
 
-  build   Gather every episode of a success/failure dataset (see collect_success_failure.py) into one trajectory
-          buffer: per-step rewards, final-critic values V(s_t) ("value_ref"), success labels and video paths.
-          --values and --success_reward swap in another critic (e.g. the binary-reward critic from
-          train_binary_critic.py, scored with critic_values.py) and the binary reward it was trained with.
+  build   Gather every episode of a success/failure dataset into one trajectory buffer and includes per-step gt rewards,
+          final critic values V(s_t) ("value_ref"), success labels and video paths. --values and --success_reward swap in another
+          critic (e.g. the binary-reward critic from train_binary_critic.py, scored with critic_values.py) and the
+          binary reward it was trained with; then also pass that critic's --gamma and, for the record, its
+          --critic_checkpoint. Writes one file, trajectory_buffer.npz.
 
-  sample  Draw K pairs of segments from the buffer (from any two episodes, or both from one episode with
+  sample  Draw --num_pairs pairs of segments from the buffer (from any two episodes, or both from one episode with
           --strategy within_episode; fixed length, or lengths drawn from a range with --segment_len_max) and label each
           pair with the critic. A segment of L steps starting at state s_0 scores
               -regret(sigma) = sum_t gamma^t A(s_t, a_t) = sum_{t<L} gamma^t r_t + gamma^L V(s_L) - V(s_0)
-          (the advantages telescope), and the segment with the higher score is "chosen". Segments where the cube is
-          already stacked in every state are dropped unless --keep_done is given.
+          (the advantages telescope), and the segment with the higher score is chosen. Early-terminated episodes
+          are skipped, and segments where the cube is already stacked in every state are dropped unless --keep_done is
+          given. Pairs whose scores differ by less than --min_margin are redrawn.
+          Outputs a .jsonl file with one pair of segments per line.
 
-  triplets  For Kendall tau as in Robometer's policy ranking: label the whole episodes of a separate validation dataset
-          successful, suboptimal (failed, critic's normalized last-state value >= --mid_min) or failure (<= --bad_max),
-          copy them into a new dataset folder and write triplets of one episode per label.
+  triplets  Generates the triplet dataset for Kendall tau as in Robometer's policy ranking: label the whole episodes of a 
+          separate validation dataset successful, suboptimal (failed, critic's normalized last-state value >= --mid_min) or failure (<= --bad_max),
+          copy them into a new dataset folder.
 
-  kendall_pairs  For Kendall tau against the critic: pairs of states from two different episodes of a validation
-          dataset, each at a frame drawn uniformly from 0 to the episode's horizon (its first stacked frame for a
-          success, its last frame for a failure), labeled with the critic's V(s) at that frame.
-
-Frame t of an episode video shows state s_t, so a segment covers frames start..end = start + L (inclusive).
+  kendall_pairs  Generates the pairwise dataset for Kendall tau. Samples two different episodes from the validation
+          dataset, then for each episode, samples a frame drawn uniformly from 0 to the episode's horizon (the first stacked frame for a
+          success, the last frame for a failure). The frame with greater ground-truth critic value is preferred. 
 
 Usage:
-  python scripts_v2/tools/preference_pairs.py build --dataset ./Datasets/CubeStack_SuccessFailure_v2
-  python scripts_v2/tools/preference_pairs.py sample --buffer ./Datasets/CubeStack_SuccessFailure_v2/trajectory_buffer.npz \
-      --num_pairs 10000 --segment_len 30 --split train --out ./Datasets/CubeStack_SuccessFailure_v2/preference_pairs/train.jsonl
-  python scripts_v2/tools/preference_pairs.py triplets --buffer ./Datasets/CubeStack_SuccessFailure_val/trajectory_buffer.npz \
-      --out_dir ./Datasets/CubeStack_KendallTriplets_val --shared_dir /scr/shared/real_to_sim_rewards/CubeStack_KendallTriplets_val
-  python scripts_v2/tools/preference_pairs.py kendall_pairs --buffer ./Datasets/CubeStack_SuccessFailure_val/trajectory_buffer.npz \
+  python scripts_v2/tools/generate_robometer_finetuning_data.py build --dataset ./Datasets/CubeStack_SuccessFailure_v3
+  python scripts_v2/tools/generate_robometer_finetuning_data.py sample \
+      --buffer ./Datasets/CubeStack_SuccessFailure_v3/trajectory_buffer.npz --num_pairs 100000 --segment_len 30 \
+      --out ./Datasets/CubeStack_SuccessFailure_v3/preference_pairs/random_L30_all_n100000.jsonl
+  python scripts_v2/tools/generate_robometer_finetuning_data.py sample \
+      --buffer ./Datasets/CubeStack_SuccessFailure_val/trajectory_buffer.npz --num_pairs 1000 --segment_len 30 \
+      --out ./Datasets/CubeStack_SuccessFailure_val/preference_pairs/random_L30_n1000.jsonl
+  python scripts_v2/tools/generate_robometer_finetuning_data.py triplets \
+      --buffer ./Datasets/CubeStack_SuccessFailure_val/trajectory_buffer.npz \
+      --out_dir ./Datasets/CubeStack_KendallTriplets_val \
+      --shared_dir /scr/shared/real_to_sim_rewards/CubeStack_KendallTriplets_val
+  python scripts_v2/tools/generate_robometer_finetuning_data.py kendall_pairs \
+      --buffer ./Datasets/CubeStack_SuccessFailure_val/trajectory_buffer.npz \
       --out ./Datasets/CubeStack_SuccessFailure_val/kendall_binary_pairs.jsonl
 """
 
@@ -100,11 +109,9 @@ def sample(args):
     lengths = np.arange(args.segment_len, (args.segment_len_max or args.segment_len) + 1)
     # candidate segments (episode, start, length). A segment needs V at its last state, so it must end by the episode's
     # last stored state; early-terminated episodes are skipped since their terminal penalty falls outside every segment.
-    in_val = buf["episode_id"] % 10 == 0  # fixed episode split: every 10th episode is held out for validation
-    use = {"all": np.ones_like(in_val), "train": ~in_val, "val": in_val}[args.split]
     candidates = {}  # episode -> (starts, lengths)
     num_total = num_done = 0
-    for e in np.flatnonzero(~buf["early_termination"] & use):
+    for e in np.flatnonzero(~buf["early_termination"]):
         T = buf["length"][e]
         stacked_count = np.concatenate([[0], np.cumsum(buf["stacked"][e][:T])])
         starts, lens = [], []
@@ -127,7 +134,7 @@ def sample(args):
     flat_ep = np.concatenate([np.full(len(candidates[e][0]), e) for e in episodes])
     flat_start = np.concatenate([candidates[e][0] for e in episodes])
     flat_len = np.concatenate([candidates[e][1] for e in episodes])
-    print(f"{args.split} split: {len(flat_ep)} candidate segments of {lengths[0]}-{lengths[-1]} steps in "
+    print(f"{len(flat_ep)} candidate segments of {lengths[0]}-{lengths[-1]} steps in "
           f"{len(episodes)} episodes" + ("" if args.keep_done else f" ({num_done} of {num_total} dropped: cube already "
                                          "stacked throughout)"))
     rng = np.random.default_rng(args.seed)
@@ -163,7 +170,7 @@ def sample(args):
                 continue
             c, r = (0, 1) if scores[0] >= scores[1] else (1, 0)
             pair = {
-                "pair_id": written, "strategy": args.strategy, "split": args.split, "task": str(buf["task"]),
+                "pair_id": written, "strategy": args.strategy, "task": str(buf["task"]),
                 "segment_len": [int(lengths[0]), int(lengths[-1])], "gamma": gamma, "margin": round(margin, 5),
                 "chosen": describe(*segs[c], scores[c]),
                 "rejected": describe(*segs[r], scores[r]),
@@ -309,8 +316,6 @@ if __name__ == "__main__":
                    help="if set, each segment's length is drawn from segment_len..segment_len_max")
     p.add_argument("--min_margin", type=float, default=0.0, help="drop pairs whose ground truth scores differ by less than this")
     p.add_argument("--keep_done", action="store_true", help="keep segments where the cube is stacked throughout")
-    p.add_argument("--split", choices=["all", "train", "val"], default="all",
-                   help="episodes to sample from; val = every 10th episode (episode_id % 10 == 0), train = the rest")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", required=True, help="output .jsonl, one pair per line")
     p = sub.add_parser("triplets", help="Robometer-style ranking triplets (successful, suboptimal, failure) of whole episodes")

@@ -1,8 +1,3 @@
-# Copyright (c) 2024-2026, The UW Lab Project Developers. (https://github.com/uw-lab/UWLab/blob/main/CONTRIBUTORS.md).
-# All Rights Reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
 """Train a critic for a fixed OmniReset policy under a binary success reward (policy evaluation).
 
 The actor of --checkpoint is frozen (weights, exploration noise and observation normalizer) and a freshly initialized
