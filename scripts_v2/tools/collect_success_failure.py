@@ -1,18 +1,14 @@
-# Copyright (c) 2024-2026, The UW Lab Project Developers. (https://github.com/uw-lab/UWLab/blob/main/CONTRIBUTORS.md).
-# All Rights Reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-
 """Collect a success / failure dataset for OmniReset cube stacking from trained RL checkpoints.
 
-Every episode is a full attempt from the task's Play reset (cube on the table, gripper anywhere). Each ``--policy`` is a
-checkpoint, optionally with Gaussian action noise (``path:noise_std``). For every episode the script saves:
+Every episode starts from the task's Play reset (cube on the table, gripper anywhere). 
+Allows adding multiple policy checkpoints, optionally with Gaussian action noise (``path:noise_std``).
+For every episode the script saves:
 
-* ``episode_XXXXX.npz``: per-step robot and cube states, policy / critic observations, actions, rewards, critic values
-  (``value``: the acting checkpoint's critic, ``value_ref``: the ``--critic_checkpoint`` critic, the same for all
-  episodes) and ``stacked`` (cube stacked after the step)
-* ``episode_XXXXX_front.mp4`` and ``episode_XXXXX_wrist.mp4``: 320x240 camera videos at the policy rate
-* one row in ``index.csv``. An episode is a success when the cube is stacked at its last step (the training metric).
+* ``episode_XXXXX.npz``: per-step robot and cube states, policy & critic observations, actions, rewards, critic values
+  (``value``: the acting policy checkpoint's corresponding critic, ``value_ref``: value for the ``--critic_checkpoint`` critic, ie the same 
+  critic for all policy checkpoints) and ``stacked`` (cube stacked after the step)
+* ``episode_XXXXX_front.mp4`` and ``episode_XXXXX_wrist.mp4``: 320x240 camera videos at the policy rate (10Hz)
+* one row in ``index.csv``, which lists every episode and their corresponding stats
 
 Usage:
     python scripts_v2/tools/collect_success_failure.py --headless \\
