@@ -18,6 +18,10 @@ Two steps (numpy only, no simulator needed):
           successful, suboptimal (failed, critic's normalized last-state value >= --mid_min) or failure (<= --bad_max),
           copy them into a new dataset folder and write triplets of one episode per label.
 
+  kendall_pairs  For Kendall tau against the critic: pairs of states from two different episodes of a validation
+          dataset, each at a frame drawn uniformly from 0 to the episode's horizon (its first stacked frame for a
+          success, its last frame for a failure), labeled with the critic's V(s) at that frame.
+
 Frame t of an episode video shows state s_t, so a segment covers frames start..end = start + L (inclusive).
 
 Usage:
@@ -25,7 +29,9 @@ Usage:
   python scripts_v2/tools/preference_pairs.py sample --buffer ./Datasets/CubeStack_SuccessFailure_v2/trajectory_buffer.npz \
       --num_pairs 10000 --segment_len 30 --split train --out ./Datasets/CubeStack_SuccessFailure_v2/preference_pairs/train.jsonl
   python scripts_v2/tools/preference_pairs.py triplets --buffer ./Datasets/CubeStack_SuccessFailure_val/trajectory_buffer.npz \
-      --out_dir ./Datasets/CubeStack_KendallTriplets_val --shared_dir /scr/shared/CubeStack_KendallTriplets_val
+      --out_dir ./Datasets/CubeStack_KendallTriplets_val --shared_dir /scr/shared/real_to_sim_rewards/CubeStack_KendallTriplets_val
+  python scripts_v2/tools/preference_pairs.py kendall_pairs --buffer ./Datasets/CubeStack_SuccessFailure_val/trajectory_buffer.npz \
+      --out ./Datasets/CubeStack_SuccessFailure_val/kendall_binary_pairs.jsonl
 """
 
 import argparse
@@ -249,6 +255,37 @@ def triplets(args):
     print(f"saved {n} of {combos} triplets to {os.path.join(args.out_dir, 'triplets.jsonl')}")
 
 
+def kendall_pairs(args):
+    """Pairs of states for Kendall tau against the critic: two different episodes, each at a frame t drawn uniformly
+    from 0 to its horizon (first stacked frame for a success, last frame for a failure), with the critic's V(s_t)."""
+    buf = dict(np.load(args.buffer))
+    use = np.flatnonzero(~buf["early_termination"])
+    horizon = {}
+    for e in use:
+        T = int(buf["length"][e])
+        # stacked[t] flags s_{t+1}: the first stacked state, as a frame index (frame t shows s_t)
+        horizon[e] = min(int(np.argmax(buf["stacked"][e, :T])) + 1, T - 1) if buf["success"][e] else T - 1
+    rng = np.random.default_rng(args.seed)
+    gaps = []
+    with open(args.out, "w") as f:
+        for i in range(args.num_pairs):
+            states = []
+            for e in rng.choice(use, size=2, replace=False):
+                t = int(rng.integers(horizon[e] + 1))
+                states.append({
+                    "episode_id": int(buf["episode_id"][e]), "frame": t, "value": round(float(buf["value"][e, t]), 5),
+                    "success": bool(buf["success"][e]), "horizon": horizon[e],
+                    "front_mp4": str(buf["front_mp4"][e]), "wrist_mp4": str(buf["wrist_mp4"][e]),
+                })  # fmt: skip
+            f.write(json.dumps({"pair_id": i, "task": str(buf["task"]), "states": states}) + "\n")
+            gaps.append(abs(states[0]["value"] - states[1]["value"]))
+    meta = {"buffer": os.path.abspath(args.buffer), "critic_checkpoint": str(buf["critic_checkpoint"]), **vars(args)}
+    with open(os.path.splitext(args.out)[0] + ".meta.json", "w") as f:
+        json.dump(meta, f, indent=1)
+    print(f"saved {args.num_pairs} pairs of states from {len(use)} episodes to {args.out}; "
+          f"|V difference| median {np.median(gaps):.3f}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -284,5 +321,10 @@ if __name__ == "__main__":
     p.add_argument("--bad_max", type=float, default=0.4, help="failures with normalized final value <= this: failure")
     p.add_argument("--num_triplets", type=int, default=1000, help="distinct triplets to write (0: every combination)")
     p.add_argument("--seed", type=int, default=0)
+    p = sub.add_parser("kendall_pairs", help="pairs of states from two episodes, labeled with the critic's V(s)")
+    p.add_argument("--buffer", required=True, help="trajectory buffer of a separate validation dataset")
+    p.add_argument("--num_pairs", type=int, default=1000)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--out", required=True, help="output .jsonl, one pair per line")
     args = parser.parse_args()
-    {"build": build, "sample": sample, "triplets": triplets}[args.cmd](args)
+    {"build": build, "sample": sample, "triplets": triplets, "kendall_pairs": kendall_pairs}[args.cmd](args)

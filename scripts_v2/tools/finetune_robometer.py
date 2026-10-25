@@ -9,7 +9,8 @@ turns preference learning off for the value distillation runs).
 
 Dense value distillation (--distill_clips N): N progress clips per step with the critic's value as the target. 
 An episode of --train_dataset is first reduced to at most 64 evenly spaced frames (Robometer's preprocessing cap); 
-three distinct frames are drawn and used as start/middle/end by a forward, reverse or rewind strategy; 
+three distinct frames are drawn and used as start/middle/end by a forward, reverse or rewind strategy
+(--distill_strategies; Robometer's ratios among those kept);
 get_segment_indices_with_middle turns them into a clip of at most the model's max_frames frames. Every frame of
 the clip (subsampled evenly to max_frames or padded to max_frames by repeating its last frame, as Robometer does) is
 trained with Robometer's discrete progress loss (cross-entropy against C51-style two-bin targets) toward the critic's
@@ -36,16 +37,16 @@ Frames fed to Robometer for a segment start..end :
 Run with Robometer's Python environment on a GPU, e.g. preferences with the test-time protocol:
   /scr/liryan/robometer/.venv/bin/python scripts_v2/tools/finetune_robometer.py --context --camera front \
       --trainable head --progress_reduce cum_delta --temperature 0.7 \
-      --train_pairs /scr/shared/CubeStack_SuccessFailure_v3/preference_pairs/random_L30_all_n100000.jsonl \
+      --train_pairs /scr/shared/real_to_sim_rewards/CubeStack_SuccessFailure_v3/preference_pairs/random_L30_all_n100000.jsonl \
       --val_pairs ./Datasets/CubeStack_SuccessFailure_val/preference_pairs/random_L30_n1000.jsonl \
-      --train_dataset /scr/shared/CubeStack_SuccessFailure_v3 --out_dir ./logs/robometer_pref/run1
+      --train_dataset /scr/shared/real_to_sim_rewards/CubeStack_SuccessFailure_v3 --out_dir ./logs/robometer_pref/run1
 or dense value distillation only (evaluated with the test-time protocol):
   /scr/liryan/robometer/.venv/bin/python scripts_v2/tools/finetune_robometer.py --context --camera front \
       --trainable head --pairs_per_step 0 --distill_clips 8 \
       --val_pairs ./Datasets/CubeStack_SuccessFailure_val/preference_pairs/random_L30_n1000.jsonl \
-      --train_dataset /scr/shared/CubeStack_SuccessFailure_v3 --out_dir ./logs/robometer_pref/run2
+      --train_dataset /scr/shared/real_to_sim_rewards/CubeStack_SuccessFailure_v3 --out_dir ./logs/robometer_pref/run2
 Add --eval_only to measure the zero-shot model (or a saved --adapter) without training.
-Each evaluation reports five metrics:
+Each evaluation reports six metrics:
   val_acc  preference accuracy on the first --num_val_pairs validation pairs (logit > 0: agrees with the critic),
            with the same segment frames, --progress_reduce as training
   pearson  on the successful episodes of --val_dataset: Pearson correlation between progress and time index,
@@ -53,6 +54,10 @@ Each evaluation reports five metrics:
   kendall  on the (successful, suboptimal, failure) triplets of --kendall_val_dataset (preference_pairs.py triplets, episodes
            of --val_dataset): each episode scored by its average progress; Robometer's compute_kendall between the
            scores and the ranks 3, 2, 1, averaged over triplets
+  kendall_binary  on the state pairs of --kendall_binary_pairs (preference_pairs.py kendall_pairs: two different
+           episodes of --val_dataset, each at a random frame t up to its first stacked frame for a success, its last
+           frame for a failure): each state scored by Robometer's progress at frame t given the episode's frames 0..t;
+           Robometer's compute_kendall between the two scores and the critic's V(s_t), averaged over pairs
   pearson_critic  on every episode of --val_dataset: Pearson correlation between progress and the ground-truth
            critic's V(s) (value_ref in the episode's .npz) on the same frames, averaged over episodes
   pearson_critic_train  the same on --num_train_eval_episodes episodes of --train_dataset (a fixed random subset; only
@@ -61,10 +66,12 @@ How pearson, kendall and pearson_critic* score an episode: Robometer predicts pr
 up to the first frame showing the cube stacked for a success, to the last frame for a failure.
 Without --context these frames are fed as one video into robometer; with --context each frame t gets its own video of
 --context_frames=8 frames spread from frame 0 to t, as in training.
+kendall_binary feeds frames 0..t the same way: every --frame_stride-th frame plus t as one video, keeping t's score;
+with --context t's own video.
 Outputs in --out_dir:
   args.json           the run's flags (args_resume<N>.json for a run resumed at step N)
   metrics.csv         one row per evaluation: step, training losses and accuracy since the previous evaluation, the
-                      five metrics above, learning rate, wall time (sec) and peak GPU memory (gpu_gb)
+                      six metrics above, learning rate, wall time (sec) and peak GPU memory (gpu_gb)
   adapter_step<N>.pt  only the trained weights (LoRA and/or progress head) at step N, saved at every evaluation and
                       every --save_every steps; load one with --adapter
   trainer_state.pt    optimizer and learning-rate schedule state at the latest adapter_step<N>.pt, for --resume
@@ -111,6 +118,8 @@ parser.add_argument("--progress_reduce", choices=["sum", "mean", "delta", "cum_d
                          "cum_delta = sum_i (p_i - p_0) (use mean or delta when segment lengths can differ)")
 parser.add_argument("--temperature", type=float, default=1.0)
 parser.add_argument("--distill_clips", type=int, default=0, help="dense value distillation clips per step (see above)")
+parser.add_argument("--distill_strategies", nargs="+", choices=["forward", "reverse", "rewind"],
+                    default=["forward", "reverse", "rewind"], help="clip strategies used for distillation")
 parser.add_argument("--pairs_per_step", type=int, default=4, help="preference pairs per step (0: no preference loss)")
 parser.add_argument("--grad_accum", type=int, default=1)
 parser.add_argument("--lr", type=float, default=2e-5)
@@ -122,10 +131,12 @@ parser.add_argument("--save_every", type=int, default=100,
                     help="save a checkpoint every this many steps between evals (0: only at evals), so a "
                          "preempted run loses less")
 parser.add_argument("--num_val_pairs", type=int, default=500)
-parser.add_argument("--val_dataset", default="/scr/shared/CubeStack_SuccessFailure_val",
+parser.add_argument("--val_dataset", default="/scr/shared/real_to_sim_rewards/CubeStack_SuccessFailure_val",
                     help="validation episodes (collect_success_failure.py), for pearson and pearson_critic")
-parser.add_argument("--kendall_val_dataset", default="/scr/shared/CubeStack_KendallTriplets_val",
+parser.add_argument("--kendall_val_dataset", default="/scr/shared/real_to_sim_rewards/CubeStack_KendallTriplets_val",
                     help="folder with triplets.jsonl (preference_pairs.py triplets) of --val_dataset episodes, for kendall")
+parser.add_argument("--kendall_binary_pairs", default="/scr/shared/real_to_sim_rewards/CubeStack_SuccessFailure_val/kendall_binary_pairs.jsonl",
+                    help="state pairs (preference_pairs.py kendall_pairs) of --val_dataset episodes, for kendall_binary")
 parser.add_argument("--train_dataset", default=None,
                     help="training episodes (collect_success_failure.py folder; the training pairs' episodes): the "
                          "--distill_clips clips and their critic targets, and pearson_critic_train")
@@ -345,12 +356,15 @@ def load_episodes(path, limit=None):
     return episodes
 
 
-def load_eval_dataset(val_path, triplets_path, train_path=None, num_train_eval_episodes=100):
-    """Loads what the episode metrics need: the validation episodes, the Kendall triplets and (optionally) the
-    training episodes for pearson_critic_train."""
+def load_eval_dataset(val_path, triplets_path, binary_pairs_path, train_path=None, num_train_eval_episodes=100):
+    """Loads what the episode metrics need: the validation episodes, the Kendall triplets, the kendall_binary state
+    pairs and (optionally) the training episodes for pearson_critic_train."""
     with open(os.path.join(triplets_path, "triplets.jsonl")) as f:
         triplets = [json.loads(line) for line in f]
-    return load_episodes(val_path), triplets, (load_episodes(train_path, num_train_eval_episodes) if train_path else [])
+    with open(binary_pairs_path) as f:
+        binary_pairs = [json.loads(line) for line in f]
+    return (load_episodes(val_path), triplets, binary_pairs,
+            load_episodes(train_path, num_train_eval_episodes) if train_path else [])
 
 
 def label_episodes(model, collator, device, episodes, task):
@@ -367,8 +381,16 @@ def label_episodes(model, collator, device, episodes, task):
     return p, corr
 
 
-def episode_metrics(model, collator, device, episodes, triplets, train_episodes):
-    """Computes pearson, kendall, pearson_critic and (with training episodes) pearson_critic_train.
+def state_progress(model, collator, device, state, task):
+    """Robometer's progress at a state's frame t given the episode's frames 0..t (every --frame_stride-th frame plus t;
+    see queries)."""
+    t = state["frame"]
+    videos = load_videos(state[f"{args.camera}_mp4"], queries(np.r_[np.arange(0, t, args.frame_stride), t])[-1:])
+    return float(scored_progress(model, collator, videos, task, device)[-1])
+
+
+def episode_metrics(model, collator, device, episodes, triplets, binary_pairs, train_episodes):
+    """Computes pearson, kendall, kendall_binary, pearson_critic and (with training episodes) pearson_critic_train.
     Pipeline: evaluation; turns the progress curves into the metrics in metrics.csv."""
     task = triplets[0]["task"]
     p, corr = label_episodes(model, collator, device, episodes, task)
@@ -376,8 +398,11 @@ def episode_metrics(model, collator, device, episodes, triplets, train_episodes)
                for ep in episodes if ep["success"]]
     kendall = [compute_kendall([1, 2, 3], [float(p[t[k]["episode_id"]].mean()) for k in ("failure", "suboptimal", "successful")])
                for t in triplets]
+    kendall_binary = [compute_kendall([s["value"] for s in pair["states"]],
+                                      [state_progress(model, collator, device, s, task) for s in pair["states"]])
+                      for pair in binary_pairs]
     out = {"pearson": float(np.nanmean(pearson)), "kendall": float(np.mean(kendall)),
-           "pearson_critic": float(np.nanmean(corr))}
+           "kendall_binary": float(np.mean(kendall_binary)), "pearson_critic": float(np.nanmean(corr))}
     if train_episodes:
         out["pearson_critic_train"] = float(np.nanmean(label_episodes(model, collator, device, train_episodes, task)[1]))
     return out
@@ -457,11 +482,12 @@ def main():
     collate = lambda b: b  # noqa: E731  (frames stay numpy; the Robometer collator runs in the main process)
     val_set = PairDataset(args.val_pairs, args.num_val_pairs)
     val_loader = DataLoader(val_set, batch_size=args.pairs_per_step or 8, num_workers=args.num_workers, collate_fn=collate)
-    eval_data = load_eval_dataset(args.val_dataset, args.kendall_val_dataset, args.train_dataset, args.num_train_eval_episodes)
+    eval_data = load_eval_dataset(args.val_dataset, args.kendall_val_dataset, args.kendall_binary_pairs, args.train_dataset,
+                                  args.num_train_eval_episodes)
 
     metrics_path = os.path.join(args.out_dir, "metrics.csv")
-    fields = ["step", "train_loss", "train_progress_loss", "train_acc", "val_acc", "pearson", "kendall", "pearson_critic", "pearson_critic_train", "lr",
-              "sec", "gpu_gb"]
+    fields = ["step", "train_loss", "train_progress_loss", "train_acc", "val_acc", "pearson", "kendall", "kendall_binary", "pearson_critic",
+              "pearson_critic_train", "lr", "sec", "gpu_gb"]
     sec0 = 0.0  # wall time already spent, so "sec" keeps counting across resumes
     if args.resume:  # keep the rows up to the resumed step, and the columns an earlier version of this script logged
         with open(metrics_path) as f:
@@ -482,7 +508,7 @@ def main():
         with open(metrics_path, "a", newline="") as f:
             csv.DictWriter(f, fieldnames=fields, extrasaction="ignore").writerow(row)
         if args.wandb:
-            wandb.log({("eval/" if k in ("val_acc", "pearson", "kendall", "pearson_critic", "pearson_critic_train") else "") + k: v for k, v in row.items()
+            wandb.log({("eval/" if k in ("val_acc", "pearson", "kendall", "kendall_binary", "pearson_critic", "pearson_critic_train") else "") + k: v for k, v in row.items()
                        if k != "step"}, step=row["step"])
 
     t0 = time.time() - sec0
@@ -502,7 +528,8 @@ def main():
         episodes, ref = load_distill_episodes(args.train_dataset)
         ratio = list(exp_config.data.progress_strategy_ratio)  # [different_task, forward, reverse, rewind]
         clips = DistillClips(episodes, eval_data[1][0]["task"], exp_config.data.max_frames,
-                             {"forward": ratio[1], "reverse": ratio[2], "rewind": ratio[3]}, args.seed)
+                             {k: r for k, r in zip(("forward", "reverse", "rewind"), ratio[1:])
+                              if k in args.distill_strategies}, args.seed)
         clip_batches = iter(DataLoader(clips, batch_size=args.distill_clips, num_workers=args.num_workers,
                                        sampler=Counter(start_step * args.distill_clips * args.grad_accum),
                                        collate_fn=collate))
