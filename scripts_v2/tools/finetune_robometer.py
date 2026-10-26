@@ -1,24 +1,22 @@
-"""Fine-tune Robometer with a trained RL critic using segment preferences and/or dense value distillation.
+"""Fine-tune Robometer with a simulation-trained critic using segment preferences and/or dense value distillation.
 
 Segment preferences: for each segment, Robometer predicts progress p_t on the scored frame.
 The whole segment is scored with --progress_reduce (sum, mean, last minus first, or the sum of every
 scored frame's gain over the first) on the frames. Its preference is calculated using Bradley-Terry over those scores,
     P(chosen > rejected) = sigmoid((score[chosen] - score[rejected]) / temperature),
-trained with cross-entropy against the critic's label (the "chosen" segment is the preferred one; --pairs_per_step 0
-turns preference learning off for the value distillation runs).
+trained with cross-entropy against the critic's label.
 
-Dense value distillation (--distill_clips N): N progress clips per step with the critic's value as the target. 
+Dense value distillation: N progress clips per step with the critic's normalized value as the target. 
 An episode of --train_dataset is first reduced to at most 64 evenly spaced frames (Robometer's preprocessing cap); 
-three distinct frames are drawn and used as start/middle/end by a forward, reverse or rewind strategy
-(--distill_strategies; Robometer's ratios among those kept);
+three distinct frames are drawn and used as start/middle/end by a forward, reverse or rewind strategy (or optionally forward only);
 get_segment_indices_with_middle turns them into a clip of at most the model's max_frames frames. Every frame of
-the clip (subsampled evenly to max_frames or padded to max_frames by repeating its last frame, as Robometer does) is
+the clip (subsampled evenly to max_frames or padded to max_frames by repeating its last frame) is
 trained with Robometer's discrete progress loss (cross-entropy against C51-style two-bin targets) toward the critic's
 V(s) at that frame. The critic's value is calculated by its unnormalized value divided by the median last-state value 
 of the dataset's successful episodes, clipped to [0, 1]. In addition, failures are also included. 
 The two losses for preferences and distillation are summed. 
 
-What can be trained:
+Which components of robometer can be trained:
   lm_lora_head  a LoRA adapter on the language model plus the whole progress head (default)
   head          the whole progress head only
   head_lora     a LoRA adapter on the progress head's linear layers only
@@ -33,6 +31,7 @@ Frames fed to Robometer for a segment start..end :
   --context  every --frame_stride-th frame of the segment is scored on its own, using their own subsampled frames (spread evenly from 0 to t)that include 
              the history before the segment. Each frame gets its own forward pass in robometer, where only the last
              score (corresponding to the score of this frame) is extracted.
+Note that --context only affects the segment preference training and the evaluation protocol; it does not affect value distillation training.
 
 Run with Robometer's Python environment on a GPU, e.g. preferences with the test-time protocol:
   /scr/liryan/robometer/.venv/bin/python scripts_v2/tools/finetune_robometer.py --context --camera front \
@@ -46,9 +45,13 @@ or dense value distillation only (evaluated with the test-time protocol):
       --val_pairs ./Datasets/CubeStack_SuccessFailure_val/preference_pairs/random_L30_n1000.jsonl \
       --train_dataset /scr/shared/real_to_sim_rewards/CubeStack_SuccessFailure_v3 --out_dir ./logs/robometer_pref/run2
 Add --eval_only to measure the zero-shot model (or a saved --adapter) without training.
-Each evaluation reports six metrics:
+
+Each evaluation reports seven metrics:
   val_acc  preference accuracy on the first --num_val_pairs validation pairs (logit > 0: agrees with the critic),
            with the same segment frames, --progress_reduce as training
+  eval_progress_loss  only with --distill_clips: the distillation loss on --num_val_clips clips from the episodes of
+           --val_dataset. The clips are drawn the same way as the training clips, and every evaluation uses the same
+           clips.
   pearson  on the successful episodes of --val_dataset: Pearson correlation between progress and time index,
            averaged over episodes
   kendall  on the (successful, suboptimal, failure) triplets of --kendall_val_dataset
@@ -73,7 +76,7 @@ with --context t's own video.
 Outputs in --out_dir:
   args.json           the run's flags (args_resume<N>.json for a run resumed at step N)
   metrics.csv         one row per evaluation: step, training losses and accuracy since the previous evaluation, the
-                      six metrics above, learning rate, wall time (sec) and peak GPU memory (gpu_gb)
+                      seven metrics above, learning rate, wall time (sec) and peak GPU memory (gpu_gb)
   adapter_step<N>.pt  only the trained weights (LoRA and/or progress head) at step N, saved at every evaluation and
                       every --save_every steps; load one with --adapter
   trainer_state.pt    optimizer and learning-rate schedule state at the latest adapter_step<N>.pt, for --resume
@@ -134,6 +137,7 @@ parser.add_argument("--save_every", type=int, default=100,
                     help="save a checkpoint every this many steps between evals (0: only at evals), so a "
                          "preempted run loses less")
 parser.add_argument("--num_val_pairs", type=int, default=500)
+parser.add_argument("--num_val_clips", type=int, default=200, help="validation clips for eval_progress_loss")
 parser.add_argument("--val_dataset", default="/scr/shared/real_to_sim_rewards/CubeStack_SuccessFailure_val",
                     help="validation episodes (collect_success_failure.py), for pearson and pearson_critic")
 parser.add_argument("--kendall_val_dataset", default="/scr/shared/real_to_sim_rewards/CubeStack_KendallTriplets_val",
@@ -263,14 +267,16 @@ def scored_progress(model, collator, videos, task, device, batch=1):
     return torch.cat(out)
 
 
-def load_distill_episodes(path):
+def load_distill_episodes(path, ref=None):
     """Loads every episode of a dataset folder with its video paths and its distillation targets: the critic's value
     at each frame, divided by the median final value of the successful episodes and clipped to [0, 1].
-    Returns (episodes, median)."""
+    If ref is given, the values are divided by ref instead, so validation targets use the training normalizer.
+    Returns (episodes, the divisor)."""
     with open(os.path.join(path, "index.csv")) as f:
         rows = list(csv.DictReader(f))
     values = [np.load(os.path.join(path, r["npz"]))["value_ref"] for r in rows]
-    ref = float(np.median([v[-1] for v, r in zip(values, rows) if r["success"] == "1"]))
+    if ref is None:
+        ref = float(np.median([v[-1] for v, r in zip(values, rows) if r["success"] == "1"]))
     return [{"episode_id": int(r["episode_id"]), "target": np.clip(v / ref, 0.0, 1.0),
              **{k: os.path.join(path, r[k]) for k in ("front_mp4", "wrist_mp4")}} for r, v in zip(rows, values)], ref
 
@@ -414,11 +420,20 @@ def episode_metrics(model, collator, device, episodes, triplets, binary_pairs, t
 
 
 @torch.no_grad()
-def evaluate(model, collator, loader, device, eval_data):
-    """Runs every eval: val_acc on the validation pairs, then the episode metrics."""
+def evaluate(model, collator, loader, device, eval_data, val_clips=None):
+    """Runs every eval: val_acc on the validation pairs, eval_progress_loss on the validation clips (if any), then the
+    episode metrics."""
     model.eval()
     correct = [pair_logit(model, collator, pair, device).item() > 0 for batch in loader for pair in batch]
-    return {"val_acc": float(np.mean(correct)), **episode_metrics(model, collator, device, *eval_data)}
+    out = {"val_acc": float(np.mean(correct))}
+    if val_clips is not None:
+        losses = []
+        for i in range(args.num_val_clips):
+            clip = val_clips[i]
+            _, logits = progress_batch(model, collator, [clip["frames"]], clip["task"], device)
+            losses.append(progress_loss(logits[0], clip["target"]).item())
+        out["eval_progress_loss"] = float(np.mean(losses))
+    return {**out, **episode_metrics(model, collator, device, *eval_data)}
 
 
 def add_head_lora(model, peft_cfg):
@@ -491,7 +506,7 @@ def main():
                                   args.num_train_eval_episodes)
 
     metrics_path = os.path.join(args.out_dir, "metrics.csv")
-    fields = ["step", "train_loss", "train_progress_loss", "train_acc", "val_acc", "pearson", "kendall", "kendall_binary", "pearson_critic",
+    fields = ["step", "train_loss", "train_progress_loss", "eval_progress_loss", "train_acc", "val_acc", "pearson", "kendall", "kendall_binary", "pearson_critic",
               "pearson_critic_train", "lr", "sec", "gpu_gb"]
     sec0 = 0.0  # wall time already spent, so "sec" keeps counting across resumes
     if args.resume:  # keep the rows up to the resumed step, and the columns an earlier version of this script logged
@@ -516,9 +531,22 @@ def main():
             wandb.log({("eval/" if k in ("val_acc", "pearson", "kendall", "kendall_binary", "pearson_critic", "pearson_critic_train") else "") + k: v for k, v in row.items()
                        if k != "step"}, step=row["step"])
 
+    val_clips = None
+    if args.distill_clips > 0:
+        episodes, ref = load_distill_episodes(args.train_dataset)
+        ratio = list(exp_config.data.progress_strategy_ratio)  # [different_task, forward, reverse, rewind]
+        ratios = {k: r for k, r in zip(("forward", "reverse", "rewind"), ratio[1:]) if k in args.distill_strategies}
+        clips = DistillClips(episodes, eval_data[1][0]["task"], exp_config.data.max_frames, ratios, args.seed)
+        # validation clips: drawn the same way from the validation episodes, with the training normalizer
+        val_clips = DistillClips(load_distill_episodes(args.val_dataset, ref)[0], eval_data[1][0]["task"],
+                                 exp_config.data.max_frames, ratios, args.seed)
+        print(f"distillation: {args.distill_clips} clips per step of at most {exp_config.data.max_frames} frames, "
+              f"strategies {dict(zip(clips.strategies, clips.p.round(3)))}; targets critic V(s) / {ref:.3f} "
+              "(median last-state value of successes), clipped to [0, 1]", flush=True)
+
     t0 = time.time() - sec0
     if not args.resume:
-        log({"step": 0, **evaluate(model, collator, val_loader, device, eval_data), "sec": time.time() - t0})
+        log({"step": 0, **evaluate(model, collator, val_loader, device, eval_data, val_clips), "sec": time.time() - t0})
     if args.eval_only:
         if args.wandb:
             wandb.finish()
@@ -530,17 +558,9 @@ def main():
         batches = iter(DataLoader(train_set, batch_size=args.pairs_per_step, num_workers=args.num_workers,
                                   sampler=ShuffledStream(len(train_set), args.seed, skip=used), collate_fn=collate))
     if args.distill_clips > 0:
-        episodes, ref = load_distill_episodes(args.train_dataset)
-        ratio = list(exp_config.data.progress_strategy_ratio)  # [different_task, forward, reverse, rewind]
-        clips = DistillClips(episodes, eval_data[1][0]["task"], exp_config.data.max_frames,
-                             {k: r for k, r in zip(("forward", "reverse", "rewind"), ratio[1:])
-                              if k in args.distill_strategies}, args.seed)
         clip_batches = iter(DataLoader(clips, batch_size=args.distill_clips, num_workers=args.num_workers,
                                        sampler=Counter(start_step * args.distill_clips * args.grad_accum),
                                        collate_fn=collate))
-        print(f"distillation: {args.distill_clips} clips per step of at most {exp_config.data.max_frames} frames, "
-              f"strategies {dict(zip(clips.strategies, clips.p.round(3)))}; targets critic V(s) / {ref:.3f} "
-              "(median last-state value of successes), clipped to [0, 1]", flush=True)
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=args.weight_decay)
     state_path = os.path.join(args.out_dir, "trainer_state.pt")
@@ -592,7 +612,7 @@ def main():
             row = {"step": step, **({"train_loss": float(np.mean(run_loss)), "train_acc": float(np.mean(run_acc))}
                                     if run_loss else {}),
                    **({"train_progress_loss": float(np.mean(run_progress))} if run_progress else {}),
-                   **evaluate(model, collator, val_loader, device, eval_data), "lr": sched.get_last_lr()[0],
+                   **evaluate(model, collator, val_loader, device, eval_data, val_clips), "lr": sched.get_last_lr()[0],
                    "sec": time.time() - t0}
             log(row)
             run_loss, run_acc, run_progress = [], [], []
