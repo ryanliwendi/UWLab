@@ -1,7 +1,7 @@
-"""Generate Robometer fine-tuning data from a collect_success_failure.py dataset, labeled by an OmniReset critic.
+"""Generate Robometer fine-tuning data from a collect_success_failure.py dataset.
 
-sample creates the training preference pairs; triplets and kendall_pairs write the validation sets of
-finetune_robometer.py's kendall and kendall_binary metrics. All three read the trajectory buffer written by build.
+```sample``` creates the training preference pairs; ```triplets``` and ```kendall_pairs``` write the validation sets of
+finetune_robometer.py's kendall and kendall_binary metrics. All three read the trajectory buffer written by ```build```.
 
   build   Gather every episode of a success/failure dataset into one trajectory buffer and includes per-step gt rewards,
           final critic values V(s_t) ("value_ref"), success labels and video paths. --values and --success_reward swap in another
@@ -67,7 +67,7 @@ def build(args):
         d = np.load(os.path.join(dataset, r["npz"]))
         n = len(d["reward"])
         reward[i, :n], value[i, :n], stacked[i, :n] = d["reward"], d["value_ref"], d["stacked"] > 0.5
-    if args.values is not None:  # another critic's V(s_t), e.g. from critic_values.py
+    if args.values is not None:  # another critic's V(s_t), e.g. from critic_values.py from a binary critic
         v = np.load(args.values)
         row = {int(e): j for j, e in enumerate(v["episode_id"])}
         for i, r in enumerate(rows):
@@ -98,7 +98,7 @@ def build(args):
 
 
 def segment_score(reward, value, start, length, gamma):
-    """-regret of the segment s_start .. s_{start+length}: discounted rewards plus the critic's bootstrap."""
+    """-regret of the segment s_start .. s_{start+length}."""
     disc = gamma ** np.arange(length)
     return float(disc @ reward[start : start + length] + gamma**length * value[start + length] - value[start])
 
@@ -106,12 +106,14 @@ def segment_score(reward, value, start, length, gamma):
 def sample(args):
     buf = dict(np.load(args.buffer))  # read every array once; NpzFile decompresses on each access
     gamma = float(buf["gamma"])
-    lengths = np.arange(args.segment_len, (args.segment_len_max or args.segment_len) + 1)
+    lengths = np.arange(args.segment_len, (args.segment_len_max or args.segment_len) + 1)  # Allows the sampled segment lengths to potentially be a range
     # candidate segments (episode, start, length). A segment needs V at its last state, so it must end by the episode's
     # last stored state; early-terminated episodes are skipped since their terminal penalty falls outside every segment.
     candidates = {}  # episode -> (starts, lengths)
+    # within_episode draws both segments of a pair from one episode, so it needs episodes with at least 2 segments
+    min_per_episode = 2 if args.strategy == "within_episode" else 1
     num_total = num_done = 0
-    for e in np.flatnonzero(~buf["early_termination"]):
+    for e in np.flatnonzero(~buf["early_termination"]):  # episode indices where the buffer did not terminate early
         T = buf["length"][e]
         stacked_count = np.concatenate([[0], np.cumsum(buf["stacked"][e][:T])])
         starts, lens = [], []
@@ -119,17 +121,14 @@ def sample(args):
             s = np.arange(max(T - L, 0))
             num_total += len(s)
             if not args.keep_done:
-                # stacked[t] is the flag of state s_{t+1}; s_0 (a reset) is never stacked. Drop a segment when the cube
-                # is stacked in every one of its states s_start .. s_{start+L}: the task is already done.
+                # Drop a segment when the cube is stacked in every one of its states s_start .. s_{start+L}
                 done = (s > 0) & (stacked_count[s + L] - stacked_count[np.maximum(s - 1, 0)] == L + 1)
                 num_done += int(done.sum())
                 s = s[~done]
             starts.append(s)
             lens.append(np.full(len(s), L))
-        if sum(map(len, starts)) >= 2:
+        if sum(map(len, starts)) >= min_per_episode:
             candidates[e] = (np.concatenate(starts), np.concatenate(lens))
-    if not candidates:
-        raise ValueError(f"no episode has 2 candidate segments of {lengths[0]}-{lengths[-1]} steps")
     episodes = np.array(list(candidates))
     flat_ep = np.concatenate([np.full(len(candidates[e][0]), e) for e in episodes])
     flat_start = np.concatenate([candidates[e][0] for e in episodes])
@@ -177,7 +176,7 @@ def sample(args):
             }  # fmt: skip
             f.write(json.dumps(pair) + "\n")
             margins.append(margin)
-            chosen_success.append(buf["success"][segs[c][0]])
+            chosen_success.append(buf["success"][segs[c][0]])  # whether chosen episode succeeded
             rejected_success.append(buf["success"][segs[r][0]])
             if segs[c][1] != segs[r][1]:
                 chosen_later.append(segs[c][1] > segs[r][1])
@@ -199,8 +198,8 @@ def sample(args):
 
 
 def triplets(args):
-    """Robometer-style ranking dataset: whole episodes labeled successful / suboptimal / failure, and triplets of one
-    episode per label. Failed episodes are split by the critic's value at their last state, normalized by the median
+    """Builds a triplet dataset of successful / suboptimal / failure episodes for kendall-tau evaluation. 
+    Suboptimal/Failed episodes are decided by the critic's value at their last state, normalized by the median
     last-state value of the successful episodes (1 = as good as a finished stack) and clipped to [0, 1]."""
     buf = dict(np.load(args.buffer))
     use = np.flatnonzero(~buf["early_termination"])
@@ -263,8 +262,9 @@ def triplets(args):
 
 
 def kendall_pairs(args):
-    """Pairs of states for Kendall tau against the critic: two different episodes, each at a frame t drawn uniformly
-    from 0 to its horizon (first stacked frame for a success, last frame for a failure), with the critic's V(s_t)."""
+    """Build the pairs dataset for kendall-tau, where a pair of frames from two episodes are sampled uniformly
+    across each episode's horizon (first stacked frame for a success, last frame for a failure) and the ground
+    truth preference is decided by the ground truth critic's value."""
     buf = dict(np.load(args.buffer))
     use = np.flatnonzero(~buf["early_termination"])
     horizon = {}
@@ -277,7 +277,7 @@ def kendall_pairs(args):
     with open(args.out, "w") as f:
         for i in range(args.num_pairs):
             states = []
-            for e in rng.choice(use, size=2, replace=False):
+            for e in rng.choice(use, size=2, replace=False):  # Sample trajectories first, then timestep
                 t = int(rng.integers(horizon[e] + 1))
                 states.append({
                     "episode_id": int(buf["episode_id"][e]), "frame": t, "value": round(float(buf["value"][e, t]), 5),
@@ -285,7 +285,7 @@ def kendall_pairs(args):
                     "front_mp4": str(buf["front_mp4"][e]), "wrist_mp4": str(buf["wrist_mp4"][e]),
                 })  # fmt: skip
             f.write(json.dumps({"pair_id": i, "task": str(buf["task"]), "states": states}) + "\n")
-            gaps.append(abs(states[0]["value"] - states[1]["value"]))
+            gaps.append(abs(states[0]["value"] - states[1]["value"]))  # Represents the ground truth preference
     meta = {"buffer": os.path.abspath(args.buffer), "critic_checkpoint": str(buf["critic_checkpoint"]), **vars(args)}
     with open(os.path.splitext(args.out)[0] + ".meta.json", "w") as f:
         json.dump(meta, f, indent=1)
