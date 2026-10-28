@@ -56,8 +56,9 @@ Each evaluation reports seven metrics:
            averaged over episodes
   kendall  on the (successful, suboptimal, failure) triplets of --kendall_val_dataset
            (generate_robometer_finetuning_data.py triplets, episodes of --val_dataset): each episode scored by its
-           average progress; Robometer's compute_kendall between the scores and the ranks 3, 2, 1, averaged over
-           triplets
+           final progress (at the first stacked frame for a success, the last frame for a failure, matching the
+           critic's final value that labels the triplets); Robometer's compute_kendall between the scores and the
+           ranks 3, 2, 1, averaged over triplets
   kendall_binary  on the state pairs of --kendall_binary_pairs (generate_robometer_finetuning_data.py kendall_pairs:
            two different episodes of --val_dataset, each at a random frame t up to its first stacked frame for a
            success, its last frame for a failure): each state scored by Robometer's progress at frame t given the
@@ -407,7 +408,7 @@ def episode_metrics(model, collator, device, episodes, triplets, binary_pairs, t
     p, corr = label_episodes(model, collator, device, episodes, task)
     pearson = [compute_pearson(list(range(len(p[ep["episode_id"]]))), p[ep["episode_id"]].tolist())
                for ep in episodes if ep["success"]]
-    kendall = [compute_kendall([1, 2, 3], [float(p[t[k]["episode_id"]].mean()) for k in ("failure", "suboptimal", "successful")])
+    kendall = [compute_kendall([1, 2, 3], [float(p[t[k]["episode_id"]][-1]) for k in ("failure", "suboptimal", "successful")])
                for t in triplets]
     kendall_binary = [compute_kendall([s["value"] for s in pair["states"]],
                                       [state_progress(model, collator, device, s, task) for s in pair["states"]])

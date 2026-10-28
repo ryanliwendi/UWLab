@@ -2,9 +2,9 @@
 
 Each run folder (written by finetune_robometer.py) is labeled with its last checkpoint (the highest
 adapter_step<N>.pt, else adapter_last.pt; or adapter_step<--step>.pt), on the run's own camera, using every --frame_stride-th frame of the whole
-episode (the frame grid of --context training). Zero-shot Robometer labels the same videos for comparison. Episodes
-whose id is a multiple of 10 are held out (the validation split of generate_robometer_finetuning_data.py); the others are training
-episodes.
+episode (the frame grid of --context training). Zero-shot Robometer labels the same videos for comparison. Whether
+the episodes are training or validation episodes depends only on --dataset (CubeStack_SuccessFailure_v3 is the training
+data, CubeStack_SuccessFailure_val the validation data).
 
 Output in --out_dir/<run>/:
   progress.png            every episode: zero-shot and fine-tuned progress next to the final critic's V(s)/11
@@ -163,7 +163,7 @@ def label(args):
         camera = run_args["camera"]
         # runs trained with the current --context are labeled that way (zero-shot too); older --context runs had no
         # context_frames and are labeled as one video like the others
-        k = run_args.get("context_frames", 0) if run_args.get("context") else 0
+        k = run_args.get("context_frames", 0) if run_args.get("context") and not args.no_context else 0
         state = match_keys(torch.load(ckpt), zero_shot)
         out = {}
         for e in args.episodes:
@@ -207,7 +207,7 @@ def curves(dataset, index, labels, e):
 
 
 def title(e, r):
-    return f"ep {e} ({'held-out' if e % 10 == 0 else 'training'}), iter {r['iteration']}: " + (
+    return f"ep {e}, iter {r['iteration']}: " + (
         "success" if r["success"] == "1" else "failure")
 
 
@@ -215,9 +215,8 @@ def render_chart(dataset, run_out):
     labels = np.load(os.path.join(run_out, "labels.npz"))
     index = read_index(dataset)
     episodes = list(labels["episodes"])
-    train, held = [e for e in episodes if e % 10], [e for e in episodes if e % 10 == 0]
-    rows = [row for row in (train, held) if row]
-    cols = max(len(row) for row in rows)
+    cols = min(7, len(episodes))
+    rows = [episodes[i : i + cols] for i in range(0, len(episodes), cols)]
     fig, axes = plt.subplots(len(rows), cols, figsize=(5 * cols, 3.4 * len(rows)), dpi=110, sharey=True, squeeze=False)
     fig.patch.set_facecolor(SURF)
     for ax_row, row in zip(axes, rows):
@@ -239,7 +238,7 @@ def render_chart(dataset, run_out):
     with open(os.path.join(run_out, "info.txt")) as f:
         info = dict(line.split(": ", 1) for line in f.read().splitlines())
     fig.suptitle(f"{info['run']}  ({info['checkpoint'].split('(')[-1].rstrip(')')}, {info['camera']} camera)   "
-                 "top: training episodes, bottom: held-out", x=0.01, ha="left", color=INK, fontsize=13)
+                 f"{os.path.basename(os.path.normpath(dataset))}", x=0.01, ha="left", color=INK, fontsize=13)
     fig.tight_layout()
     fig.savefig(os.path.join(run_out, "progress.png"), facecolor=SURF)
     plt.close(fig)
@@ -409,6 +408,9 @@ if __name__ == "__main__":
     p.add_argument("--frame_stride", type=int, default=3)
     p.add_argument("--step", type=int, default=None,
                    help="use adapter_step<step>.pt instead of the last checkpoint (output folder <run>_step<step>)")
+    p.add_argument("--no_context", action="store_true",
+                   help="score each episode as one video even for a run trained with --context, so it can be compared "
+                        "with runs trained without it")
     sub.choices["render"].add_argument("--workers", type=int, default=8)
     p = sub.add_parser("compare")
     p.add_argument("--dataset", required=True, help="folder written by collect_success_failure.py")
