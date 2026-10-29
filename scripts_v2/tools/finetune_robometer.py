@@ -21,6 +21,7 @@ Which components of robometer can be trained:
   head          the whole progress head only
   head_lora     a LoRA adapter on the progress head's linear layers only
   lm_lora_head_lora  LoRA adapters on both the language model and the progress head's linear layers
+  full          the whole language model plus the progress head
 
 Frames fed to Robometer for a segment start..end :
   default    every --frame_stride-th (default: 3) frame of the segment are scored. These frames are passed once into
@@ -78,8 +79,8 @@ Outputs in --out_dir:
   args.json           the run's flags (args_resume<N>.json for a run resumed at step N)
   metrics.csv         one row per evaluation: step, training losses and accuracy since the previous evaluation, the
                       seven metrics above, learning rate, wall time (sec) and peak GPU memory (gpu_gb)
-  adapter_step<N>.pt  only the trained weights (LoRA and/or progress head) at step N, saved at every evaluation and
-                      every --save_every steps; load one with --adapter
+  adapter_step<N>.pt  only the trained weights (LoRA, progress head and, with --trainable full, the language model) at
+                      step N, saved at every evaluation and every --save_every steps; load one with --adapter
   trainer_state.pt    optimizer and learning-rate schedule state at the latest adapter_step<N>.pt, for --resume
 """
 
@@ -151,8 +152,8 @@ parser.add_argument("--train_dataset", default=None,
                     help="training episodes (collect_success_failure.py folder; the training pairs' episodes): the "
                          "--distill_clips clips and their critic targets, and pearson_critic_train")
 parser.add_argument("--num_train_eval_episodes", type=int, default=100, help="training episodes evaluated for pearson_critic_train")
-parser.add_argument("--trainable", choices=["lm_lora_head", "head", "head_lora", "lm_lora_head_lora"],
-                    default="head")
+parser.add_argument("--trainable", choices=["lm_lora_head", "head", "head_lora", "lm_lora_head_lora", "full"],
+                    default="lm_lora_head")
 parser.add_argument("--adapter", default=None, help="adapter_*.pt to start from (or to evaluate with --eval_only)")
 parser.add_argument("--eval_only", action="store_true")
 parser.add_argument("--resume", action="store_true", help="continue a stopped run in --out_dir from its last adapter")
@@ -476,8 +477,9 @@ def main():
 
     exp_config, tokenizer, processor, model = load_model_from_hf(model_path=args.model_path, device=device)
     collator = setup_batch_collator(processor, tokenizer, exp_config, is_eval=True)
-    for p in model.parameters():
-        p.requires_grad = False
+    for name, p in model.named_parameters():
+        # full: the language model (and frame_pool_attn, which Robometer also trains); the progress head follows below
+        p.requires_grad = args.trainable == "full" and ("language_model" in name or "frame_pool_attn" in name)
     if args.trainable.startswith("lm_lora"):
         model = setup_peft_model(model, exp_config.peft)  # LoRA adapter on the language model (r=32, alpha=64)
     if args.trainable.endswith("head_lora"):
