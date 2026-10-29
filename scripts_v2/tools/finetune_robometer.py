@@ -8,7 +8,7 @@ trained with cross-entropy against the critic's label.
 
 Dense value distillation: N progress clips per step with the critic's normalized value as the target. 
 An episode of --train_dataset is first reduced to at most 64 evenly spaced frames (Robometer's preprocessing cap); 
-three distinct frames are drawn and used as start/middle/end by a forward, reverse or rewind strategy (or optionally forward only);
+three distinct frames are drawn and used as start/middle/end by the forward strategy (by default; --distill_strategies can add reverse and rewind);
 get_segment_indices_with_middle turns them into a clip of at most the model's max_frames frames. Every frame of
 the clip (subsampled evenly to max_frames or padded to max_frames by repeating its last frame) is
 trained with Robometer's discrete progress loss (cross-entropy against C51-style two-bin targets) toward the critic's
@@ -127,7 +127,7 @@ parser.add_argument("--progress_reduce", choices=["sum", "mean", "delta", "cum_d
 parser.add_argument("--temperature", type=float, default=1.0)
 parser.add_argument("--distill_clips", type=int, default=0, help="dense value distillation clips per step (see above)")
 parser.add_argument("--distill_strategies", nargs="+", choices=["forward", "reverse", "rewind"],
-                    default=["forward", "reverse", "rewind"], help="clip strategies used for distillation")
+                    default=["forward"], help="clip strategies used for distillation")
 parser.add_argument("--pairs_per_step", type=int, default=4, help="preference pairs per step (0: no preference loss)")
 parser.add_argument("--grad_accum", type=int, default=1)
 parser.add_argument("--lr", type=float, default=2e-5)
@@ -197,7 +197,7 @@ def load_videos(path, qs):
 
 
 class ShuffledStream(torch.utils.data.Sampler):
-    """Yields shuffled pair indices, a new permutation each epoch fixed by the seed. Used for training."""
+    """Yields shuffled pair indices, a new permutation each epoch fixed by the seed. Used for forming the training batch."""
 
     def __init__(self, n, seed, skip=0):
         self.n, self.seed, self.skip = n, seed, skip
@@ -255,7 +255,7 @@ def progress_batch(model, collator, videos, task, device):
 
 def scored_progress(model, collator, videos, task, device, batch=1):
     """Runs Robometer on each video from load_videos and keeps its last n_scored (1 for context, all for no-context) 
-    progress values: one progress value per scored frame, in order."""
+    progress values."""
     out = [None] * len(videos)
     by_len = {}
     for i, (frames, _) in enumerate(videos):
@@ -273,7 +273,7 @@ def load_distill_episodes(path, ref=None):
     """Loads every episode of a dataset folder with its video paths and its distillation targets: the critic's value
     at each frame, divided by the median final value of the successful episodes and clipped to [0, 1].
     If ref is given, the values are divided by ref instead, so validation targets use the training normalizer.
-    Returns (episodes, the divisor)."""
+    Returns (episodes, divisor)."""
     with open(os.path.join(path, "index.csv")) as f:
         rows = list(csv.DictReader(f))
     values = [np.load(os.path.join(path, r["npz"]))["value_ref"] for r in rows]
@@ -381,8 +381,8 @@ def load_eval_dataset(val_path, triplets_path, binary_pairs_path, train_path=Non
 
 
 def label_episodes(model, collator, device, episodes, task):
-    """Scores each episode with Robometer (a success up to its first stacked frame, a failure whole) and returns
-    {episode_id: progress} and each episode's Pearson correlation with the critic's value on the same frames."""
+    """Scores each episode with Robometer and returns {episode_id: progress} and each episode's 
+    Pearson correlation with the critic's value on the same frames."""
     p, corr = {}, []
     for ep in episodes:
         idx = np.arange(0, len(VideoReader(ep[f"{args.camera}_mp4"], ctx=cpu(0))), args.frame_stride)
