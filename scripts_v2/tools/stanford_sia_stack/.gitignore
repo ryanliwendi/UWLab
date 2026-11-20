@@ -1,0 +1,8 @@
+references/
+assets/upstream/
+assets/usd/
+assets/textures/
+renders/
+__pycache__/
+*.pyc
+config/controller-plan.json

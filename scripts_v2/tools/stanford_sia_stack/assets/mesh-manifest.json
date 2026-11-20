@@ -1,0 +1,116 @@
+[
+  {
+    "path": "assets/upstream/franka_description/meshes/robot_ee/franka_hand_white/collision/hand.stl",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robot_ee/franka_hand_white/collision/hand.stl",
+    "sha256": "94493e94f30fe940f2c8ca2f155c3bbe67bbff406d3edf5e261670d2f0f6e2ed",
+    "bytes": 10084
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robot_ee/franka_hand_white/visual/finger.dae",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robot_ee/franka_hand_white/visual/finger.dae",
+    "sha256": "12c7bc9b55ffd0d1d0e3442d3e213ecc4fbebbced15259a20195af464f871fcd",
+    "bytes": 52371
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robot_ee/franka_hand_white/visual/hand.dae",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robot_ee/franka_hand_white/visual/hand.dae",
+    "sha256": "1b50601d3157f810176aba6db7164d6bdb4ec8b6546a8a725baba2fa2a21c58a",
+    "bytes": 550371
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/collision/link0.stl",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/collision/link0.stl",
+    "sha256": "56990396d712b2ebb89f7d29083973c823babd3bfa605f2d2863bd1069d29788",
+    "bytes": 18784
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/collision/link1.stl",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/collision/link1.stl",
+    "sha256": "e023cf1db282e07f38597d4e7f9edae03cd0dc338974677b31639f677411dc18",
+    "bytes": 11884
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/collision/link2.stl",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/collision/link2.stl",
+    "sha256": "3117fd3aea238c07fc1bf678784d38497bfdd603a7760bf36b7fb31b15f0624e",
+    "bytes": 11484
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/collision/link3.stl",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/collision/link3.stl",
+    "sha256": "1f21215bdb62892271a263969c92dc1be15c409ec8fc96b6bdec3c28d77f0e6e",
+    "bytes": 13584
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/collision/link4.stl",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/collision/link4.stl",
+    "sha256": "b9574ef02cdf234dff9f12359e00f6c11a4b062cf73d1db20894c57f5a9d716a",
+    "bytes": 13184
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/collision/link5.stl",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/collision/link5.stl",
+    "sha256": "c174872b06547dc6acdd027679e476d4cddffe0224cb048763bdbf4f68fe7542",
+    "bytes": 13384
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/collision/link6.stl",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/collision/link6.stl",
+    "sha256": "9ad5c4698aed204cd505e74356adfbb955196913d0b75a616c3865b319d39e6b",
+    "bytes": 16234
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/collision/link7.stl",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/collision/link7.stl",
+    "sha256": "c48646a72ed0264e5f90b221327fd2b72163935ec7bc1cde9612ac1dcf23eabf",
+    "bytes": 15784
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/visual/link0.dae",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link0.dae",
+    "sha256": "3c52a112d1610d645934945b80ea8d9bb3d1635f345098480a33a537bd43224e",
+    "bytes": 7079719
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/visual/link1.dae",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link1.dae",
+    "sha256": "5c5846eabc714aefc82ef051a4d09c4fc1c092bca6258b1290227345dd217fcb",
+    "bytes": 906843
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/visual/link2.dae",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link2.dae",
+    "sha256": "90a1bd38abdc53d0141719cd8e040f788db337b768a845bb6d53c5c52590498f",
+    "bytes": 921715
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/visual/link3.dae",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link3.dae",
+    "sha256": "1c7a2a8124e39ad07096c0cce8461b0e650f6752900cfd777bf87c181e81749b",
+    "bytes": 2475274
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/visual/link4.dae",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link4.dae",
+    "sha256": "dd134cf13cdaced2b67739e4d9fe2ca011cc533936397d9f6303fc740424e2a2",
+    "bytes": 2533228
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/visual/link5.dae",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link5.dae",
+    "sha256": "cbcabd369e044eba3f1c2cab84b9ed2ebc1b2f424c6104ad9c5d7410e92fabfe",
+    "bytes": 3259292
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/visual/link6.dae",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link6.dae",
+    "sha256": "907b16fea84931f4881174234065bb647700abf105b432c3ff65360e0ad5cf8b",
+    "bytes": 5252660
+  },
+  {
+    "path": "assets/upstream/franka_description/meshes/robots/fr3/visual/link7.dae",
+    "url": "https://raw.githubusercontent.com/frankarobotics/franka_description/7aeeddc449edf8d62b594f9e36a81da53e7796f9/meshes/robots/fr3/visual/link7.dae",
+    "sha256": "b9d05ac502ff269b1323705de811d07a8eb9920ce711b32ee0497bf16b74989b",
+    "bytes": 4243523
+  }
+]
