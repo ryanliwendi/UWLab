@@ -28,24 +28,6 @@ def add_details(stage, scene, campos, camrot, K, box, mesh, material, plane_poin
         )
 
     cable(
-        "HandCable",
-        [
-            ray_point(p, 1, -0.07)
-            for p in [
-                (126, 79),
-                (133, 111),
-                (142, 156),
-                (180, 174),
-                (230, 177),
-                (264, 183),
-                (263, 204),
-                (291, 215),
-                (303, 213),
-            ]
-        ],
-        0.0025,
-    )
-    cable(
         "BasePower",
         [
             plane_point(*p, 0.012)
