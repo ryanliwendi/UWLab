@@ -1,0 +1,10 @@
+references/
+video-examples/
+assets/meshes/
+assets/usd/
+assets/textures/
+renders/
+__pycache__/
+*.pyc
+config/controller-plan.json
+validation/
